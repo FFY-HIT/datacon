@@ -1,0 +1,13 @@
+[
+  {
+    "cve_id": "CVE-2017-15396",
+    "status": "UNSUPPORTED",
+    "model": "cursor-agent",
+    "elapsed_sec": 0,
+    "total_tokens": 0,
+    "llm_calls": 0,
+    "iterations": 0,
+    "failure_class": "unsupported",
+    "conclusion": "S2 browser/V8 hard exclude; agent-only"
+  }
+]

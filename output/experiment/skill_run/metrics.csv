@@ -1,0 +1,2 @@
+﻿cve_id,status,model,elapsed_sec,total_tokens,llm_calls,iterations,failure_class,conclusion
+CVE-2017-15396,UNSUPPORTED,cursor-agent,0,0,0,0,unsupported,S2 browser/V8 hard exclude; agent-only
