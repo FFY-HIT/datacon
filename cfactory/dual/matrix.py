@@ -67,6 +67,7 @@ def run_test_matrix(
     network: str = "none",
     evidence_dir: str | Path = "",
     trigger_poc_code: str = "",
+    extra_run_args: list[str] | None = None,
 ) -> MatrixResult:
     """执行矩阵。验收脚本判定，不采信 Agent 自报。"""
     task_dir = Path(task_dir)
@@ -85,7 +86,8 @@ def run_test_matrix(
     normal = _normal_probe_poc(port)
     ex = DockerPoCExecutor(
         vulnerable_image=vulnerable_image, fixed_image=fixed_image,
-        port=port, network=network, poc_dir=evid / "runs", docker=docker)
+        port=port, network=network, poc_dir=evid / "runs", docker=docker,
+        extra_args=extra_run_args)
 
     def _one(label: str, image: str, poc: PoC, expect_marker: bool) -> dict[str, Any]:
         if image == vulnerable_image:

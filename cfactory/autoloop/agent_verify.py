@@ -26,6 +26,7 @@ from ..reproduce_score import compute_score
 
 _TASK_FILES = (
     "Dockerfile", "service.py", "service.rb", "service.js",
+    "reader_worker.py",
     "poc_reference.py", "solution.sh", "run-tests.sh", "README.md",
     "control_image.txt",
 )
@@ -167,6 +168,7 @@ def run_agent_verify(
         evidence_dir=Path(cfg.output_dir) / "evidence" / out.cve_id
         / f"agent{attempt}",
         trigger_poc_code=files.get("poc_reference.py") or "",
+        extra_run_args=cfg.run_extra_args(),
     )
     if acceptance.require_clean_rebuild:
         matrix.rebuild_ok = True

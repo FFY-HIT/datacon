@@ -27,13 +27,15 @@ class DockerPoCExecutor:
     def __init__(self, *, vulnerable_image: str, fixed_image: str = "",
                  port: int = 18080, network: str = "none",
                  poc_dir: str | Path = "", docker: str = "docker",
-                 timeout: int = 180) -> None:
+                 timeout: int = 180,
+                 extra_args: list[str] | None = None) -> None:
         self.vuln = vulnerable_image
         self.fixed = fixed_image
         self.port = int(port or 18080)
         self.network = network or "none"
         self.docker = docker
         self.timeout = timeout
+        self.extra_args = list(extra_args or [])
         self.poc_dir = Path(poc_dir) if poc_dir else Path("output") / "poc_runs"
         self.poc_dir.mkdir(parents=True, exist_ok=True)
         self.count = 0
@@ -51,6 +53,8 @@ class DockerPoCExecutor:
         run_cmd = [self.docker, "run", "-d", "--rm", "--name", name,
                    "--network", self.network,
                    "-v", f"{host.resolve()}:/task/{fname}:ro", tag]
+        if self.extra_args:
+            run_cmd[2:2] = list(self.extra_args)
         rc, out, err, dur = _run(run_cmd, 90)
         if rc != 0:
             rec = ExecResult(exit_code=rc, stdout=out, stderr=err, duration=dur,

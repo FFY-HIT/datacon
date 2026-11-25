@@ -50,12 +50,23 @@ class Config:
     docker: str = "docker"
     network_mode: str = "none"
     target_platform: str = "linux/amd64"
-    max_build_seconds: int = 600
+    max_build_seconds: int = int(os.getenv("CVE_FACTORY_MAX_BUILD_SECONDS", "600"))
     max_run_seconds: int = 180
     pip_index_url: str = field(default_factory=lambda: os.getenv(
         "CVE_FACTORY_PIP_INDEX", "https://mirrors.tencent.com/pypi/simple/"))
     docker_hub_mirror: str = field(default_factory=lambda: os.getenv(
         "CVE_FACTORY_DOCKER_HUB_MIRROR", "dockerproxy.net").strip())
+    # 额外 docker run 参数（空格分隔），供需要内核能力的任务使用，
+    # 如 iptables 类 "--cap-add NET_ADMIN --cap-add NET_RAW"。默认空=行为不变。
+    docker_run_extra: str = field(default_factory=lambda: os.getenv(
+        "CVE_FACTORY_DOCKER_RUN_EXTRA", "").strip())
+
+    def run_extra_args(self) -> list[str]:
+        import shlex
+        try:
+            return shlex.split(self.docker_run_extra)
+        except ValueError:
+            return self.docker_run_extra.split()
 
     # ---- 路径 ----
     root: str = str(_AUTO_ROOT)

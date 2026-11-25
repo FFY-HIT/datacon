@@ -282,6 +282,7 @@ class DockerRuntime:
         run_cmd = [self.cfg.docker, "run", "-d", "--rm", "--name", name,
                    "--network", self.cfg.network_mode,
                    "--platform", self.cfg.target_platform, tag]
+        run_cmd[2:2] = self.cfg.run_extra_args()
         rc, out, err, _ = _run(run_cmd, 60)
         if rc != 0:
             return {"reachable": False, "exit_code": rc,
@@ -351,6 +352,7 @@ class DockerRuntime:
                    "--platform", self.cfg.target_platform,
                    "-v", f"{sol.resolve()}:/tmp/solution.sh:ro",
                    vulnerable_tag]
+        run_cmd[2:2] = self.cfg.run_extra_args()
         rc, out, err, _ = _run(run_cmd, 90)
         if rc != 0:
             return {"success": False, "tag": fixed_tag, "label": "fixed_build",

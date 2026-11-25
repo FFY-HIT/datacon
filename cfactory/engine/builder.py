@@ -196,16 +196,26 @@ def build_from_recipe(
             ctrl_dir = task_dir / ".control"
             ctrl_dir.mkdir(parents=True, exist_ok=True)
             for name in ("run-tests.sh", "poc_reference.py", "recipe.json",
-                         "solution.sh"):
+                         "solution.sh", "httpd.conf"):
                 src = task_dir / name
                 if src.is_file():
                     (ctrl_dir / name).write_text(
                         src.read_text(encoding="utf-8"), encoding="utf-8")
+            cgi_src = task_dir / "cgi-bin"
+            if cgi_src.is_dir():
+                cgi_dst = ctrl_dir / "cgi-bin"
+                cgi_dst.mkdir(parents=True, exist_ok=True)
+                for src in cgi_src.glob("*.cgi"):
+                    (cgi_dst / src.name).write_text(
+                        src.read_text(encoding="utf-8"), encoding="utf-8")
             port = int(recipe.port or 8080)
             py_setup = (
                 "USER root\n"
-                "RUN apt-get update && apt-get install -y --no-install-recommends "
-                "python3 && rm -rf /var/lib/apt/lists/*\n"
+                "RUN sed -i 's|deb.debian.org|mirrors.tencent.com|g' "
+                "/etc/apt/sources.list.d/debian.sources 2>/dev/null || true \\\n"
+                "    && apt-get update && apt-get install -y "
+                "--no-install-recommends python3 "
+                "&& rm -rf /var/lib/apt/lists/*\n"
             )
             if "jetty" in ctrl_image:
                 df = (
@@ -216,6 +226,25 @@ def build_from_recipe(
                     f"EXPOSE {port}\n"
                     f'CMD ["java","-jar","/usr/local/jetty/start.jar",'
                     f'"jetty.http.port={port}"]\n'
+                )
+            elif "httpd" in ctrl_image:
+                # Apache httpd 官方镜像：沿用任务包配置/CGI，做 CRLF 清洗
+                df = (
+                    f"FROM {ctrl_image}\n"
+                    f"{py_setup}"
+                    "COPY httpd.conf /usr/local/apache2/conf/httpd.conf\n"
+                    "COPY cgi-bin/ /usr/local/apache2/cgi-bin/\n"
+                    "RUN tr -d '\\r' < /usr/local/apache2/conf/httpd.conf "
+                    "> /tmp/c.conf "
+                    "&& cat /tmp/c.conf > /usr/local/apache2/conf/httpd.conf "
+                    "&& for f in /usr/local/apache2/cgi-bin/*.cgi; do "
+                    "tr -d '\\r' < \"$f\" > /tmp/f.cgi "
+                    "&& cat /tmp/f.cgi > \"$f\"; done "
+                    "&& chmod 755 /usr/local/apache2/cgi-bin/*.cgi\n"
+                    "COPY . /task/\n"
+                    "RUN chmod +x /task/run-tests.sh /task/solution.sh || true\n"
+                    f"EXPOSE {port}\n"
+                    'CMD ["httpd-foreground"]\n'
                 )
             else:
                 df = (

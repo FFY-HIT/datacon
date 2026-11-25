@@ -1,0 +1,26 @@
+From: Amos Jeffries <amosjeffries@squid-cache.org>
+Date: Sat, 21 Jul 2018 21:07:00 +1300
+Subject: Use installed squid binary for Debian CI testing
+
+--- a/test-suite/Makefile.am
++++ b/test-suite/Makefile.am
+@@ -150,7 +150,7 @@ VirtualDeleteOperator_SOURCES = VirtualD
+ squid-conf-tests: $(top_builddir)/src/squid.conf.default $(srcdir)/squidconf/*
+ 	@failed=0; cfglist="$?"; rm -f $@ || $(TRUE); \
+ 	for cfg in $$cfglist ; do \
+-		$(top_builddir)/src/squid -k parse -f $$cfg || \
++		/usr/sbin/squid -k parse -f $$cfg || \
+ 			{ echo "FAIL: squid.conf test: $$cfg" | \
+ 				sed s%$(top_builddir)/src/%% | \
+ 				sed s%$(srcdir)/squidconf/%% ; \
+--- a/test-suite/Makefile.in
++++ b/test-suite/Makefile.in
+@@ -1534,7 +1534,7 @@ STUB.h: $(top_srcdir)/src/tests/STUB.h
+ squid-conf-tests: $(top_builddir)/src/squid.conf.default $(srcdir)/squidconf/*
+ 	@failed=0; cfglist="$?"; rm -f $@ || $(TRUE); \
+ 	for cfg in $$cfglist ; do \
+-		$(top_builddir)/src/squid -k parse -f $$cfg || \
++		/usr/sbin/squid -k parse -f $$cfg || \
+ 			{ echo "FAIL: squid.conf test: $$cfg" | \
+ 				sed s%$(top_builddir)/src/%% | \
+ 				sed s%$(srcdir)/squidconf/%% ; \

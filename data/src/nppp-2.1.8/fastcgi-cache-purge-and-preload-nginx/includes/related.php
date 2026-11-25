@@ -1,0 +1,373 @@
+<?php
+/**
+ * Related URL purge helpers for Nginx Cache Purge Preload
+ * Description: Purges and optionally preloads related archives when singular content is purged.
+ *              whenever a single post/page is purged (via auto purge, front-end action, or Advanced tab).
+ * Version: 2.1.8
+ * Author: Hasan CALISIR
+ * Author Email: hasan.calisir@psauxit.com
+ * Author URI: https://www.psauxit.com
+ * License: GPL-2.0+
+ */
+
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+// Return related URLs for a primary URL, based on plugin options.
+function nppp_get_related_urls_for_single(string $primary_url): array {
+    $settings = get_option( 'nginx_cache_settings', array() );
+    $urls     = array();
+
+    // Flags (keep existing option keys)
+    $include_home = ! empty( $settings['nppp_related_include_home'] ) && $settings['nppp_related_include_home'] === 'yes';
+    $include_shop = ! empty( $settings['nppp_related_apply_manual'] ) && $settings['nppp_related_apply_manual'] === 'yes'; // repurposed to "Shop"
+    $include_cat  = ! empty( $settings['nppp_related_include_category'] ) && $settings['nppp_related_include_category'] === 'yes';
+
+    // 1) Home page (if enabled) — already unconditional, applies to all purge targets.
+    if ( $include_home ) {
+        $urls[] = home_url( '/' );
+    }
+
+    // Resolve post from URL (posts, pages, products, CPTs).
+    // url_to_postid() returns 0 for taxonomy archive URLs (it only resolves singular posts).
+    $post_id = url_to_postid( $primary_url );
+    if ( $post_id ) {
+        $post_type = get_post_type( $post_id );
+
+        // 2) WooCommerce Shop page (if enabled, and primary URL is a product).
+        if ( $include_shop && 'product' === $post_type && function_exists( 'wc_get_page_id' ) ) {
+            $shop_id = (int) wc_get_page_id( 'shop' );
+            if ( $shop_id > 0 && 'publish' === get_post_status( $shop_id ) ) {
+                $shop_url = get_permalink( $shop_id );
+                if ( $shop_url ) {
+                    $urls[] = $shop_url;
+                }
+            }
+        }
+
+        // 3) All public taxonomy archives registered on this post type.
+        //    Covers category + post_tag for posts, product_cat + product_tag for
+        //    WooCommerce products, and any custom taxonomy.
+        //    post_format is intentionally included: if the site uses post formats
+        //    and Nginx caches /type/video/ etc., those archives need purging too.
+        //    Taxonomies with rewrite=false have no archive URL and are skipped.
+        if ( $include_cat ) {
+            $taxonomies = get_object_taxonomies( $post_type, 'objects' );
+            foreach ( $taxonomies as $tax_obj ) {
+                if ( empty( $tax_obj->public ) || false === $tax_obj->rewrite ) {
+                    continue;
+                }
+                $terms = get_the_terms( $post_id, $tax_obj->name );
+                if ( is_wp_error( $terms ) || empty( $terms ) ) {
+                    continue;
+                }
+                foreach ( $terms as $term ) {
+                    $link = get_term_link( $term, $tax_obj->name );
+                    if ( ! is_wp_error( $link ) && ! empty( $link ) ) {
+                        $urls[] = $link;
+                    }
+                }
+            }
+        }
+
+        // 4) Author archive.
+        //    get_author_posts_url() never returns false — it always returns a
+        //    string (pretty URL or ?author=ID fallback). Guard with
+        //    post_type_supports('author') so pages and author-less CPTs are
+        //    skipped: they have no author archive URL to invalidate.
+        if ( $include_cat && post_type_supports( $post_type, 'author' ) ) {
+            $author_id = (int) get_post_field( 'post_author', $post_id );
+            if ( $author_id > 0 ) {
+                $author_url = get_author_posts_url( $author_id );
+                if ( $author_url && wp_http_validate_url( $author_url ) ) {
+                    $urls[] = $author_url;
+                }
+            }
+        }
+
+        // 5) Date-based archives (year / month / day).
+        //    WP core only creates date archive pages for the built-in 'post'
+        //    post type — custom CPTs with has_archive do NOT get date archives.
+        //    These functions always return a URL string (never false/empty), so
+        //    no false-check is needed. Use date_parse() to safely extract the
+        //    year/month/day integers from the stored post_date value.
+        if ( $include_cat && 'post' === $post_type ) {
+            $post_date = (string) get_post_field( 'post_date', $post_id );
+            if ( $post_date !== '' ) {
+                $parsed = date_parse( $post_date );
+                if ( ! empty( $parsed ) && empty( $parsed['errors'] ) && ! empty( $parsed['year'] ) ) {
+                    $urls[] = get_year_link( $parsed['year'] );
+                    if ( ! empty( $parsed['month'] ) ) {
+                        $urls[] = get_month_link( $parsed['year'], $parsed['month'] );
+                        if ( ! empty( $parsed['day'] ) ) {
+                            $urls[] = get_day_link( $parsed['year'], $parsed['month'], $parsed['day'] );
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5a) Separate "Posts page" (blog index) - Home scope.
+        //     With Settings > Reading set to a static front page plus a
+        //     "Posts page", home_url('/') is the static front page and the blog
+        //     listing lives at a different URL. Core maps the built-in 'post'
+        //     archive to that page in get_post_type_archive_link(), but falls
+        //     back to the home URL in every other configuration, so the
+        //     show_on_front / page_for_posts guard below is required to keep the
+        //     Home switch semantics unchanged. Only page 1 of the listing is
+        //     added; deeper pagination pages are not enumerated here.
+        if ( $include_home && 'post' === $post_type && 'page' === get_option( 'show_on_front' ) ) {
+            $nppp_posts_page_id = (int) get_option( 'page_for_posts' );
+            if ( $nppp_posts_page_id > 0 && 'publish' === get_post_status( $nppp_posts_page_id ) ) {
+                $nppp_posts_page_url = get_post_type_archive_link( 'post' );
+                if ( is_string( $nppp_posts_page_url ) && $nppp_posts_page_url !== '' ) {
+                    $urls[] = $nppp_posts_page_url;
+                }
+            }
+        }
+
+        // 5b) Custom post type archive (has_archive) - Archives scope.
+        //     'post' is excluded because core resolves it to the home URL,
+        //     which is governed by the Home switch. 'product' is excluded
+        //     because WooCommerce's archive is the Shop page, governed by the
+        //     Shop switch (2). is_post_type_viewable() mirrors the check core
+        //     uses before serving a post type archive; get_post_type_archive_link()
+        //     returns false when the type has no archive.
+        if ( $include_cat && is_string( $post_type ) && ! in_array( $post_type, array( 'post', 'product' ), true ) && is_post_type_viewable( $post_type ) ) {
+            $nppp_pt_archive_url = get_post_type_archive_link( $post_type );
+            if ( is_string( $nppp_pt_archive_url ) && $nppp_pt_archive_url !== '' ) {
+                $urls[] = $nppp_pt_archive_url;
+            }
+        }
+    } else {
+        // 2b) WooCommerce Shop page for product taxonomy archive URLs.
+        if ( $include_shop && function_exists( 'wc_get_page_id' ) ) {
+            $is_wc_product_tax = false;
+            foreach ( array( 'product_cat', 'product_tag' ) as $_wc_tax ) {
+                $tax_obj = get_taxonomy( $_wc_tax );
+                if ( ! $tax_obj || empty( $tax_obj->rewrite ) || false === $tax_obj->rewrite ) {
+                    continue;
+                }
+                $rewrite_slug = $tax_obj->rewrite['slug'] ?? '';
+                if ( $rewrite_slug === '' ) {
+                    continue;
+                }
+                $path = wp_parse_url( $primary_url, PHP_URL_PATH ) ?? '';
+                // Match /<rewrite-slug>/ anywhere in the path (handles sub-paths too).
+                if ( false !== strpos( $path, '/' . ltrim( $rewrite_slug, '/' ) . '/' ) ) {
+                    $is_wc_product_tax = true;
+                    break;
+                }
+            }
+            if ( $is_wc_product_tax ) {
+                $shop_id = (int) wc_get_page_id( 'shop' );
+                if ( $shop_id > 0 && 'publish' === get_post_status( $shop_id ) ) {
+                    $shop_url = get_permalink( $shop_id );
+                    if ( $shop_url ) {
+                        $urls[] = $shop_url;
+                    }
+                }
+            }
+        }
+    }
+
+    // 6) RSS / Atom feeds.
+    //
+    //    Main site feed — only for the built-in 'post' post type and only when
+    //    $include_home is enabled, since it represents the site-level feed.
+    //    get_feed_link() always returns a URL string; no false-check required.
+    //
+    //    Per-post comments feed — included when comments are open OR when the
+    //    post already has approved comments (published comments stay cached even
+    //    after comments are closed). get_post_comments_feed_link() returns an
+    //    empty string when the post does not exist — safe to check with !empty().
+    //
+    //    Taxonomy feeds — one RSS feed URL per assigned public taxonomy term.
+    //    get_term_feed_link() returns false on error; checked with if ($link).
+    //    Gate matches the taxonomy archive gate ($include_cat) so feed and
+    //    archive are always purged together.
+    if ( $post_id ) {
+        $post_type_for_feed = (string) get_post_type( $post_id );
+
+        // Main site feed (posts only, home-level setting).
+        if ( $include_home && 'post' === $post_type_for_feed ) {
+            $urls[] = get_feed_link( 'rss2' );
+        }
+
+        // Per-post comments feed.
+        // Only include when comments are open OR the post already has comments —
+        // an empty comment feed that was never cached does not need purging.
+        $has_comments = ( comments_open( $post_id ) || get_comments_number( $post_id ) > 0 );
+        if ( $has_comments ) {
+            $comment_feed = get_post_comments_feed_link( $post_id );
+            if ( ! empty( $comment_feed ) ) {
+                $urls[] = $comment_feed;
+            }
+        }
+
+        // Taxonomy RSS feeds — mirrors the taxonomy archive gate.
+        if ( $include_cat ) {
+            $tax_objects = get_object_taxonomies( $post_type_for_feed, 'objects' );
+            foreach ( $tax_objects as $tax_obj ) {
+                if ( empty( $tax_obj->public ) || false === $tax_obj->rewrite ) {
+                    continue;
+                }
+                $terms = get_the_terms( $post_id, $tax_obj->name );
+                if ( is_wp_error( $terms ) || empty( $terms ) ) {
+                    continue;
+                }
+                foreach ( $terms as $term ) {
+                    $feed_link = get_term_feed_link( $term->term_id, $tax_obj->name );
+                    if ( $feed_link && ! is_wp_error( $feed_link ) ) {
+                        $urls[] = $feed_link;
+                    }
+                }
+            }
+        }
+    }
+
+    // 7) Comment pagination pages.
+    // Generated only when WordPress comment pagination is active (Settings >
+    // Discussion > "Break comments into pages").
+    if ( $post_id && get_option( 'page_comments' ) ) {
+        $nppp_cmt_per_page = (int) get_option( 'comments_per_page' );
+        if ( $nppp_cmt_per_page > 0 ) {
+            $nppp_cmt_total = (int) get_comments_number( $post_id );
+            $nppp_cmt_pages = (int) ceil( $nppp_cmt_total / $nppp_cmt_per_page );
+            if ( $nppp_cmt_pages > 1 ) {
+                $nppp_cmt_permalink = get_permalink( $post_id );
+                if ( $nppp_cmt_permalink ) {
+                    global $wp_rewrite;
+                    $nppp_cmt_newest = ( get_option( 'default_comments_page' ) === 'newest' );
+                    for ( $nppp_cmt_i = 1; $nppp_cmt_i <= $nppp_cmt_pages; $nppp_cmt_i++ ) {
+                        // Skip the page that maps to the base permalink — already in primary.
+                        $nppp_cmt_is_base = $nppp_cmt_newest
+                            ? ( $nppp_cmt_i === $nppp_cmt_pages )
+                            : ( $nppp_cmt_i === 1 );
+                        if ( $nppp_cmt_is_base ) {
+                            continue;
+                        }
+                        if ( $wp_rewrite->using_permalinks() ) {
+                            $nppp_cmt_url = user_trailingslashit(
+                                trailingslashit( $nppp_cmt_permalink )
+                                    . $wp_rewrite->comments_pagination_base . '-' . $nppp_cmt_i,
+                                'commentpaged'
+                            );
+                        } else {
+                            $nppp_cmt_url = add_query_arg( 'cpage', $nppp_cmt_i, $nppp_cmt_permalink );
+                        }
+                        if ( wp_http_validate_url( $nppp_cmt_url ) ) {
+                            $urls[] = $nppp_cmt_url;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Normalization
+    $primary_norm = user_trailingslashit($primary_url, 'single');
+
+    // keep only non-empty, valid absolute URLs
+    $urls = array_filter($urls, static function ($u) {
+        return is_string($u) && $u !== '' && false !== wp_http_validate_url($u);
+    } );
+
+    // normalize trailing slashes using site preference
+    $urls = array_map(static function ($u) {
+        return user_trailingslashit($u, 'single');
+    }, $urls);
+
+    // dedupe and remove the primary itself
+    $urls = array_values(array_unique(array_diff($urls, array($primary_norm))));
+
+    return apply_filters('nppp_related_urls_for_single', $urls, $primary_url, $settings);
+}
+
+// Fire-and-forget — collapses N×UA wget processes into max 2 total (1 per UA).
+// Optimized for high Related Preload situation for over 100 URL in v2.1.7
+function nppp_preload_urls_fire_and_forget(array $urls): void {
+    if (empty($urls)) return;
+    if ( ! function_exists( 'shell_exec' ) ) return;
+
+    $settings                 = get_option('nginx_cache_settings');
+    $preload_mobile           = !empty($settings['nginx_cache_auto_preload_mobile']) && $settings['nginx_cache_auto_preload_mobile'] === 'yes';
+    $nginx_cache_path         = isset($settings['nginx_cache_path']) ? $settings['nginx_cache_path'] : '/dev/shm/change-me-now';
+    $nginx_cache_limit_rate   = isset($settings['nginx_cache_limit_rate']) ? (int)$settings['nginx_cache_limit_rate'] : 5120;
+    $nginx_cache_read_timeout = isset($settings['nginx_cache_read_timeout']) ? (int)$settings['nginx_cache_read_timeout'] : 60;
+    $tmp_path                 = rtrim($nginx_cache_path, '/') . '/tmp';
+
+    // Proxy settings
+    $proxy_settings = nppp_get_proxy_settings();
+    $use_proxy      = $proxy_settings['use_proxy'];
+    $http_proxy     = $proxy_settings['http_proxy'];
+    $https_proxy    = $http_proxy;
+
+    // safexec
+    $safexec_path = nppp_find_safexec_path();
+    $use_safexec  = nppp_is_safexec_usable($safexec_path ?: '', false);
+
+    // Validate all URLs and collect pre-escaped shell args.
+    // URLs from nppp_get_related_urls_for_single() pass filter_var() upstream,
+    // but the nppp_related_urls_for_single filter is a public hook — third-party
+    // code can inject URLs that bypassed the nppp_is_internal_url() check.
+    // That check only runs here, making this the sole host-validation gate
+    // for every entry before it reaches shell_exec.
+    $valid_url_args = [];
+    foreach ($urls as $u) {
+        if (false !== wp_http_validate_url($u) && nppp_is_internal_url($u)) { // CVE-2025-6213
+            $valid_url_args[] = escapeshellarg($u);
+        }
+    }
+
+    if (empty($valid_url_args)) return;
+
+    // Domain allowlist: restricts which redirect targets wget will follow.
+    $home_parsed = wp_parse_url(home_url('/'));
+    $home_host   = strtolower($home_parsed['host'] ?? '');
+    if ($home_host === '') return;
+    $base_host   = preg_replace('/^www\./i', '', $home_host);
+    $domain_list = escapeshellarg(implode(',', array_unique([$base_host, 'www.' . $base_host])));
+
+    // Common wget flags: built once, shared across both UA invocations.
+    $common =
+        '--quiet --no-config --no-cookies --delete-after ' .
+        '--no-dns-cache --no-check-certificate --prefer-family=IPv4 ' .
+        '--dns-timeout=10 --connect-timeout=5 --read-timeout=' . $nginx_cache_read_timeout . ' --tries=1 ' .
+        '-e robots=off ' .
+        '-e ' . escapeshellarg('use_proxy=' . $use_proxy) . ' ' .
+        '-e ' . escapeshellarg('http_proxy=' . $http_proxy) . ' ' .
+        '-e ' . escapeshellarg('https_proxy=' . $https_proxy) . ' ' .
+        '-P ' . escapeshellarg($use_safexec ? '/tmp' : $tmp_path) . ' ' .
+        '--limit-rate=' . $nginx_cache_limit_rate . 'k ' .
+        '--domains=' . $domain_list . ' ' .
+        '--header=' . escapeshellarg(NPPP_HEADER_ACCEPT) . ' ';
+
+    $safexec_prefix = $use_safexec ? escapeshellarg($safexec_path) . ' ' : '';
+
+    // All URLs passed to a single wget invocation per UA.
+    // GNU wget fetches every command-line URL sequentially in one process.
+    $url_args_str = '-- ' . implode(' ', $valid_url_args);
+
+    // Desktop — 1 process total, regardless of how many related URLs.
+    $cmd_desktop = $safexec_prefix .
+        'nohup wget ' . $common .
+        '--user-agent=' . escapeshellarg(NPPP_USER_AGENT) . ' ' .
+        $url_args_str . ' >/dev/null 2>&1 &';
+    shell_exec($cmd_desktop);
+
+    // Mobile — 1 process total (if enabled).
+    if ($preload_mobile) {
+        $nppp_mobile_ua = ! empty($settings['nginx_cache_mobile_user_agent'])
+            ? $settings['nginx_cache_mobile_user_agent']
+            : NPPP_USER_AGENT_MOBILE;
+
+        $cmd_mobile = $safexec_prefix .
+            'nohup wget ' . $common .
+            '--user-agent=' . escapeshellarg($nppp_mobile_ua) . ' ' .
+            $url_args_str . ' >/dev/null 2>&1 &';
+        shell_exec($cmd_mobile);
+    }
+}

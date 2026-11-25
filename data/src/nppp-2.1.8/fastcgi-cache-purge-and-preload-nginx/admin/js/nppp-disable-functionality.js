@@ -1,0 +1,477 @@
+/**
+ * Unsupported-environment guards for Nginx Cache Purge Preload
+ * Description: Disables plugin actions in admin when required runtime conditions are not met.
+ * Version: 2.1.8
+ * Author: Hasan CALISIR
+ * Author Email: hasan.calisir@psauxit.com
+ * Author URI: https://www.psauxit.com
+ * License: GPL-2.0+
+ */
+
+// Disable NPP functionality in unsupported environments
+(function($) {
+    'use strict';
+
+    $(document).ready(function() {
+        // Select the buttons in the admin bar with unique names
+        var npppAllButtons = {
+            npppPreload: $('#wp-admin-bar-preload-cache'),
+            npppStopPreload: $('#wp-admin-bar-stop-preload-cache'),
+            npppPurge: $('#wp-admin-bar-purge-cache'),
+            npppStatus: $('#wp-admin-bar-fastcgi-cache-status'),
+            npppAdvanced: $('#wp-admin-bar-fastcgi-cache-advanced')
+        };
+
+        // Function to disable a single button
+        function npppDisableButtonSingle(npppButton) {
+            if (npppButton.length) {
+                npppButton.off('click');
+                $(document).off('click', `#${npppButton.attr('id')}`);
+
+                npppButton.find('a')
+                    .removeAttr('href')
+                    .css({
+                        'cursor': 'not-allowed'
+                    })
+                    .on('click', function(event) {
+                        event.preventDefault();
+                    });
+            }
+        }
+
+        // Function to disable all buttons at once
+        function npppDisableButtonAll() {
+            $.each(npppAllButtons, function(_, npppBtn) {
+                npppDisableButtonSingle(npppBtn);
+            });
+        }
+
+        // Disable all buttons
+        npppDisableButtonAll();
+
+        // Disable WP dashboard widget buttons
+        $('.nppp-action-button').addClass('disabled').removeAttr('href');
+
+        // Disable dashboard widget refresh button
+        $('.nppp-ratio-refresh').prop('disabled', true).css({'cursor': 'not-allowed'});
+        $(document).off('click', '.nppp-ratio-refresh');
+
+        // Check if we're on the plugin settings page and disable plugin functionality
+        if ($('#nppp-nginx-tabs').length > 0) {
+            // Disable Purge and Preload buttons on settings page
+            $('.nppp-button').addClass('disabled').removeAttr('href');
+
+            // Disable status and advanced tabs
+            $('#nppp-nginx-tabs').tabs({
+                disabled: [1, 2]
+            });
+
+            // Disable the schedule checkbox
+            $('#nginx_cache_schedule').prop('disabled', true);
+
+            // disable the rest api checkbox
+            $('#nginx_cache_api').prop('disabled', true);
+
+            // disable the schedule set cron button
+            $('#nginx-cache-schedule-set').prop('disabled', true);
+
+            // disable auto preload checkbox
+            $('#nginx_cache_auto_preload').prop('disabled', true);
+
+            // disable preload proxy checkbox
+            $('#nginx_cache_preload_enable_proxy').prop('disabled', true);
+
+            // disable preload mobile checkbox
+            $('#nginx_cache_auto_preload_mobile').prop('disabled', true);
+
+            // disable send mail checkbox
+            $('#nginx_cache_send_mail').prop('disabled', true);
+
+            // disable auto purge checkbox
+            $('#nginx_cache_purge_on_update').prop('disabled', true);
+
+            // disable reset regex button
+            $('#nginx-regex-reset-defaults').prop('disabled', true);
+
+            // disable reset file extension button
+            $('#nginx-extension-reset-defaults').prop('disabled', true);
+
+            // disable reset cache key regex button
+            $('#nginx-key-regex-reset-defaults').prop('disabled', true);
+
+            // disable reset mobile user agent button
+            $('#nginx-mobile-ua-reset-defaults').prop('disabled', true);
+
+            // disable clear logs button
+            $('#clear-logs-button').prop('disabled', true);
+
+            // disable generate API key button
+            $('#api-key-button').prop('disabled', true);
+
+            // disable Test Regex probe button
+            $('#nppp-test-regex-btn').prop('disabled', true);
+
+            // Lock free-text/number settings to read-only.
+            $(
+                '#nginx_cache_api_key, '              +
+                '#nginx_cache_key_custom_regex, '     +
+                '#nginx_cache_email, '                +
+                '#nginx_cache_read_timeout, '         +
+                '#nginx_cache_wait_request, '         +
+                '#nginx_cache_limit_rate, '           +
+                '#nginx_cache_reject_extension, '     +
+                '#nginx_cache_reject_regex, '         +
+                '#nginx_cache_cpu_limit, '            +
+                '#nginx_cache_preload_proxy_port, '   +
+                '#nginx_cache_preload_proxy_host, '   +
+                '#nginx_cache_mobile_user_agent'
+            )
+                .attr('readonly', 'readonly')
+                .css({ cursor: 'not-allowed' });
+
+            // Related purge checkboxes (lock + detach)
+            function npppLockCheckbox(name){
+                const $cb = $(`input[type="checkbox"][name="${name}"]`);
+                if (!$cb.length) return;
+
+                // Preserve the real current state — these options are already
+                // forced to 'no' by nppp_disable_features() before this page
+                // renders.
+                const currentVal = $cb.is(':checked') ? 'yes' : 'no';
+
+                $cb.prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'title':'Locked in unsupported environment'})
+                    .off('click change')
+                    .on('click.npppLock change.npppLock', function(e){ e.preventDefault(); return false; });
+
+                $cb.closest('label, .form-table tr, p').css({
+                    cursor: 'not-allowed',
+                    pointerEvents: 'none',
+                    userSelect: 'none'
+                });
+
+                const $form = $cb.closest('form');
+                if ($form.length && !$form.find(`input[type="hidden"][name="${name}"]`).length){
+                    $('<input>', {type:'hidden', name, value: currentVal}).appendTo($form);
+                }
+            }
+
+            // call for each setting
+            npppLockCheckbox('nginx_cache_settings[nppp_related_include_home]');
+            npppLockCheckbox('nginx_cache_settings[nppp_related_include_category]');
+            npppLockCheckbox('nginx_cache_settings[nppp_related_preload_after_manual]');
+            npppLockCheckbox('nginx_cache_settings[nppp_related_apply_manual]');
+
+            // Add hidden mirror so disabled controls still submit a value
+            function ensureHiddenMirror($form, name, value){
+                if (!$form.length || !name) return;
+                const sel = `input[type="hidden"][name="${name}"]`;
+                if (!$form.find(sel).length){
+                    $('<input>', { type:'hidden', name, value }).appendTo($form);
+                } else {
+                    $form.find(sel).val(value);
+                }
+            }
+
+            // Disable the pctnorm radiogroup cleanly and preserve its value
+            (function disablePctNorm(){
+                const $fs = $('#nppp-pctnorm');
+                if (!$fs.length) return;
+
+                const $form = $fs.closest('form');
+                const $radios = $fs.find('input[type="radio"]');
+                const name = $radios.first().attr('name');
+                const currentVal = $radios.filter(':checked').val();
+
+                // visuals + semantics
+                $fs.attr({'aria-disabled':'true'}).css({ opacity:.5, cursor:'not-allowed' });
+                $fs.find('label, .nppp-segcontrol-thumb').css('pointer-events','none');
+
+                // make non-interactive
+                $radios.prop('disabled', true).attr('tabindex','-1').off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                // hidden mirror for submit
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Disable Cloudflare APO sync toggle and preserve current value
+            (function disableCloudflareApoSync(){
+                const $cloudflareToggle = $('#nppp_cloudflare_apo_sync');
+                if (!$cloudflareToggle.length) return;
+
+                const $form = $cloudflareToggle.closest('form');
+                const name = $cloudflareToggle.attr('name');
+                const currentVal = $cloudflareToggle.is(':checked') ? 'yes' : 'no';
+
+                $cloudflareToggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $cloudflareToggle
+                    .closest('.nppp-onoffswitch-cloudflare')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-cloudflare')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Disable Redis Object Cache sync toggle and preserve current value
+            (function disableRedisCacheSync(){
+                const $redisToggle = $('#nppp_redis_cache_sync');
+                if (!$redisToggle.length) return;
+
+                const $form = $redisToggle.closest('form');
+                const name = $redisToggle.attr('name');
+                const currentVal = $redisToggle.is(':checked') ? 'yes' : 'no';
+
+                $redisToggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $redisToggle
+                    .closest('.nppp-onoffswitch-redis')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-redis')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Disable HTTP purge fast-path toggle and sub-fields
+            (function disableHttpPurge(){
+                const $toggle = $('#nppp_http_purge_enabled');
+                if (!$toggle.length) return;
+
+                const $form     = $toggle.closest('form');
+                const name      = $toggle.attr('name');
+                const currentVal = $toggle.is(':checked') ? 'yes' : 'no';
+
+                $toggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $toggle
+                    .closest('.nppp-onoffswitch-httppurge')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-httppurge')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+
+                // Disable Test Connection button
+                $('#nppp-test-http-purge').prop('disabled', true).css({ cursor:'not-allowed' });
+
+                // Lock sub-fields visually only — `disabled` strips a field from
+                // the POST body entirely, which made settings-sanitize.php see them
+                // as empty and fire the "cannot be empty" reset errors on every save.
+                // `readonly` keeps them non-editable while still submitting their value.
+                $('#nppp_http_purge_suffix, #nppp_http_purge_custom_url, #nppp_http_purge_all_path')
+                    .attr('readonly', 'readonly')
+                    .css({ cursor:'not-allowed' });
+            })();
+
+            // Bypass Path Restriction is intentionally left live: it has no
+            // shell_exec/exec dependency and is the only control that lets the
+            // admin clear an open_basedir / unconfigured-path GLOBAL ERROR.
+
+            // Disable Ripgrep Purge toggle
+            (function disableRgPurge(){
+                const $toggle = $('#nppp_rg_purge_enabled');
+                if (!$toggle.length) return;
+
+                const $form      = $toggle.closest('form');
+                const name       = $toggle.attr('name');
+                const currentVal = $toggle.is(':checked') ? 'yes' : 'no';
+
+                $toggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $toggle
+                    .closest('.nppp-onoffswitch-rgpurge')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-rgpurge')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Disable watchdog toggle and preserve current value
+            (function disableWatchdog(){
+                const $watchdogToggle = $('#nginx_cache_watchdog');
+                if (!$watchdogToggle.length) return;
+
+                const $form = $watchdogToggle.closest('form');
+                const name = $watchdogToggle.attr('name');
+                const currentVal = $watchdogToggle.is(':checked') ? 'yes' : 'no';
+
+                $watchdogToggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $watchdogToggle
+                    .closest('.nppp-onoffswitch-watchdog')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-watchdog')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Disable preload feeds toggle and preserve current value
+            (function disablePreloadFeeds(){
+                const $toggle = $('#nginx_cache_preload_feeds');
+                if (!$toggle.length) return;
+
+                const $form     = $toggle.closest('form');
+                const name      = $toggle.attr('name');
+                const currentVal = $toggle.is(':checked') ? 'yes' : 'no';
+
+                $toggle
+                    .prop('disabled', true)
+                    .attr({'aria-disabled':'true', 'tabindex':'-1'})
+                    .off('.nppp')
+                    .on('click.nppp change.nppp', function(e){ e.preventDefault(); return false; });
+
+                $toggle
+                    .closest('.nppp-onoffswitch-preload-feeds')
+                    .css({ cursor:'not-allowed' })
+                    .find('.nppp-onoffswitch-label-preload-feeds')
+                    .css({ 'pointer-events':'none', 'cursor':'not-allowed' });
+
+                ensureHiddenMirror($form, name, currentVal);
+            })();
+
+            // Make REST API helper elements non-clickable.
+            $('#nppp-api-key .nppp-tooltip, #nppp-purge-url .nppp-tooltip, #nppp-preload-url .nppp-tooltip').css({
+                'cursor': 'not-allowed'
+            }).each(function() {
+                $(this).off('click');
+            });
+
+            // Ensure parent <p> containers are also non-clickable.
+            $('#nppp-api-key, #nppp-purge-url, #nppp-preload-url').css({
+                'cursor': 'not-allowed'
+            }).each(function() {
+                $(this).off('click');
+            });
+
+            // style cron status heading
+            $('.nppp-active-cron-heading').css({
+                'cursor': 'not-allowed'
+            });
+
+            // In fully-disabled mode the Status tab is inaccessible, so the user
+            // cannot reach the "Clear Plugin Cache" button that lives there.
+            (function npppInjectCacheClearFallback() {
+                var $submit = $('input[type="submit"][name="nppp_submit"].button-primary');
+                if (!$submit.length) { return; }
+
+                if (typeof window.nppp_admin_data === 'undefined') { return; }
+
+                // 1. Capture exact computed dimensions BEFORE hide() — layout is live here.
+                var cs          = window.getComputedStyle($submit[0]);
+                var csHeight    = cs.height;
+                var csLineH     = cs.lineHeight;
+                var csPadTop    = cs.paddingTop;
+                var csPadBottom = cs.paddingBottom;
+                var csFontSize  = cs.fontSize;
+                var csFontWt    = cs.fontWeight;
+                var csFontFam   = cs.fontFamily;
+                var csBoxSizing = cs.boxSizing;
+
+                // 2. Keep the real submit live — it's the only way back from an
+                // open_basedir/unconfigured-path GLOBAL ERROR,
+                // Status tab is unreachable here, so we still
+                // add a Clear Cache button next to it rather than instead of it.
+
+                // 3. Build pixel-perfect replacement input.
+                var btnLabel = window.nppp_admin_data.clear_cache_btn_label
+                    ? window.nppp_admin_data.clear_cache_btn_label
+                    : 'Clear Plugin Cache';
+
+                var $clearBtn = $('<input>', {
+                    type:  'button',
+                    id:    'nppp-disabled-clear-cache-btn',
+                    value: btnLabel
+                }).css({
+                    'box-sizing':    csBoxSizing,
+                    'height':        csHeight,
+                    'line-height':   csLineH,
+                    'padding-top':   csPadTop,
+                    'padding-bottom': csPadBottom,
+                    'padding-left':  '10px',
+                    'padding-right': '10px',
+                    'font-size':     csFontSize,
+                    'font-weight':   csFontWt,
+                    'font-family':   csFontFam,
+                    'width':             'auto',
+                    'margin-left':       '8px',
+                    'background-color':  '#0073aa',
+                    'color':             '#fff',
+                    'border':            'none',
+                    'border-radius':     '0',
+                    'cursor':            'pointer',
+                    '-webkit-appearance': 'none',
+                    'appearance':        'none'
+                });
+
+                // 4. Hover / focus states via injected stylesheet.
+                if (!document.getElementById('nppp-ccf-style')) {
+                    var npppStyle = document.createElement('style');
+                    npppStyle.id = 'nppp-ccf-style';
+                    npppStyle.textContent =
+                        '#nppp-disabled-clear-cache-btn:hover{background-color:#006799!important;}' +
+                        '#nppp-disabled-clear-cache-btn:focus{box-shadow:none!important;outline:none!important;}' +
+                        '#nppp-disabled-clear-cache-btn[disabled]{opacity:.65;cursor:wait!important;}';
+                    document.head.appendChild(npppStyle);
+                }
+
+                // 5. Insert inside .submit flex container after the hidden submit.
+                $submit.after($clearBtn);
+
+                // 6. Silent AJAX handler — no spinner, no notification toast.
+                $clearBtn.on('click', function () {
+                    var $btn      = $(this);
+                    var origLabel = $btn.val();
+
+                    $btn.prop('disabled', true).val(
+                        origLabel + '\u2026'
+                    );
+
+                    $.ajax({
+                        url:      window.nppp_admin_data.ajaxurl,
+                        type:     'POST',
+                        dataType: 'json',
+                        data: {
+                            action:   'nppp_clear_plugin_cache',
+                            _wpnonce: window.nppp_admin_data.plugin_cache_nonce
+                        },
+                        success: function (response) {
+                            if (response && response.success) {
+                                location.reload();
+                            } else {
+                                $btn.prop('disabled', false).val(origLabel);
+                            }
+                        },
+                        error: function () {
+                            $btn.prop('disabled', false).val(origLabel);
+                        }
+                    });
+                });
+            })();
+        }
+    });
+})(jQuery);

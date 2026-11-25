@@ -16,3 +16,10 @@ output/evidence/
 *.pyc
 .DS_Store
 Thumbs.db
+
+# Large local-only artifacts (GitHub 100MB limit)
+**/wheels/
+*.whl
+output/probe32444/
+output/dockerhub_push*.log
+data/scratch/
